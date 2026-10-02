@@ -1,1 +1,1 @@
-line with </script> and </div> end
+obsolete
