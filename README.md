@@ -232,3 +232,10 @@ is in the CSV. `add_price_overlay.py --remove` strips the overlay cleanly.
 - `short interest CapIQ.txt` — CapIQ field reference notes
 - `SI_TRACKER_PROJECT_NOTES.md` — Detailed project documentation (canonical engineering notes)
 - `ISSUES.md` — Known issues and fixes
+
+## Scheduled FINRA ingestion
+
+The optional PostgreSQL collector and GitHub Actions schedule are documented in
+[SUPABASE_SETUP.md](SUPABASE_SETUP.md). Deployment requires applying migrations
+and setting the private `SUPABASE_DB_URL` Actions secret. This collector does not
+yet refresh the embedded dashboard.
