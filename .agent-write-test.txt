@@ -1,1 +1,1 @@
-test <tag> and & amp
+line with </script> and </div> end
