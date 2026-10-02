@@ -1,0 +1,31 @@
+name: materialize-publish
+on:
+  workflow_dispatch:
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: auto-expand-finra-universe
+      - name: Decode publish_finra_dashboard.py from gzip+base64
+        run: |
+          python3 - <<'PY'
+          import base64, gzip
+          from pathlib import Path
+          b64 = Path('publish_finra_dashboard.py.gz.b64').read_text().strip()
+          Path('publish_finra_dashboard.py').write_bytes(gzip.decompress(base64.b64decode(b64)))
+          Path('publish_finra_dashboard.py.gz.b64').unlink(missing_ok=True)
+          Path('.github/workflows/materialize-publish.yml').unlink(missing_ok=True)
+          Path('.agent-write-test.txt').unlink(missing_ok=True)
+          PY
+      - name: Commit materialized files
+        run: |
+          git config user.name "pranaybop"
+          git config user.email "56706652+pranaybop@users.noreply.github.com"
+          git add -A
+          git status
+          git commit -m "Materialize publish_finra_dashboard.py (auto-expand universe)"
+          git push origin HEAD:auto-expand-finra-universe
