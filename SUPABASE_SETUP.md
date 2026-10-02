@@ -20,7 +20,8 @@ is the UI template; the freshly published artifact is built in `site/`.
    suitable network access; Supabase direct connections normally require IPv6,
    whereas the session pooler supports IPv4 on GitHub runners.
 3. Push and merge the changes onto the default branch and enable GitHub Actions.
-   In repository Settings → Pages, set Source to **GitHub Actions**.
+   If you have Pages administration access, set Source to **GitHub Actions**.
+   The existing branch-based Pages configuration also supports this deployment.
    Manually run **FINRA fetch to Supabase**, with `backfill` checked, to load
    history. Check logs for failures and inspect `public.finra_ingest_runs`.
 4. The schedule polls weekdays at **14:17 UTC**. It discovers files by probing
@@ -69,7 +70,9 @@ After successful ingestion the `build` job runs `publish_finra_dashboard.py`,
 validates the resulting HTML, and uploads only `site/` to Pages. The `deploy`
 job publishes it to https://zyyzx.github.io/si-dashboard/si_dashboard.html (the
 root URL redirects there). On a build/validation failure the previous site stays
-published. No generated HTML commits or extra credentials are needed. The
+published. No generated HTML commits or extra credentials are needed. If legacy branch
+publishing is enabled, the workflow also runs after `pages-build-deployment`
+finishes on main, so a template build is followed by the database-backed build. The
 `github-pages` environment must allow deployments from the default branch.
 
 The build retains the existing curated ticker universe and theme/sector

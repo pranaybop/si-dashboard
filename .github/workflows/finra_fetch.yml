@@ -1,6 +1,12 @@
 name: FINRA fetch to Supabase
 
 on:
+  # If legacy branch publishing is enabled, restore the database-backed artifact
+  # after its template build. Custom deploy-pages runs do not trigger this event.
+  workflow_run:
+    workflows: ["pages-build-deployment"]
+    types: [completed]
+    branches: [main]
   schedule:
     - cron: "17 14 * * 1-5" # UTC; poll weekdays for new files and recent revisions
   workflow_dispatch:
