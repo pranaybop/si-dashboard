@@ -24,8 +24,11 @@ is the UI template; the freshly published artifact is built in `site/`.
    The existing branch-based Pages configuration also supports this deployment.
    Manually run **FINRA fetch to Supabase**, with `backfill` checked, to load
    history. Check logs for failures and inspect `public.finra_ingest_runs`.
-4. The schedule polls weekdays at **14:17 UTC**. It discovers files by probing
+4. The schedule polls weekdays at **11:17 UTC** (7:17 a.m. EDT / 6:17 a.m. EST). It discovers files by probing
    settlement weekdays, rather than relying on an exact publication time.
+   The early run leaves time for ingestion and Pages deployment before 9 a.m.
+   Eastern. GitHub scheduling can be delayed; this is not a guaranteed deadline.
+   FINRA files released after the morning poll appear on the next successful run.
    Successful periods and their manifest commit together. Recent 45-day periods
    are always reloaded to capture corrections, including removed symbols.
 5. For corrections older than 45 days, manually dispatch with both `backfill`
