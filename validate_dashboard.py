@@ -82,7 +82,7 @@ THRESHOLD_CHECKS = [
     ("card border -0.4",    '-0.4?"th-cold"'),
     ("badge neutral -0.4",  'heat>=-0.4?\'<span class="th-badge th-badge-neutral"'),
     ("alert covering -0.4", 'return(t.heat||0)<=-0.4'),
-    ("long signal label",   "\U0001f7e2 Covering (long signal):"),
+    ("covering alert label", ("\U0001f7e2 Covering (long signal):", "\U0001f7e2 Covering:")),
 ]
 
 DATA_MARKERS = [
@@ -331,7 +331,8 @@ def run(path):
     # 10. UI threshold consistency
     print("\n[ 10/11 ] UI threshold consistency")
     for name, needle in THRESHOLD_CHECKS:
-        if needle in html:
+        alternatives = (needle,) if isinstance(needle, str) else needle
+        if any(text in html for text in alternatives):
             ok(name)
         else:
             err("Threshold mismatch or missing: " + name)

@@ -237,5 +237,7 @@ is in the CSV. `add_price_overlay.py --remove` strips the overlay cleanly.
 
 The optional PostgreSQL collector and GitHub Actions schedule are documented in
 [SUPABASE_SETUP.md](SUPABASE_SETUP.md). Deployment requires applying migrations
-and setting the private `SUPABASE_DB_URL` Actions secret. This collector does not
-yet refresh the embedded dashboard.
+and setting the private `SUPABASE_DB_URL` Actions secret. After ingestion, the workflow builds and validates the embedded dashboard
+from Supabase and publishes it to GitHub Pages. Visitors can view it for free
+without a login. See the setup guide for Pages configuration and data freshness
+limitations.

@@ -55,5 +55,10 @@ Single-step runs: each `build_*.py` / `export_candidates.py` has `main()` and ca
 manual backfill/refresh. Apply both `supabase/migrations/` files before ingestion.
 See `SUPABASE_SETUP.md` for secret and deployment setup. Recent periods refresh
 for corrections; historical backfill uses `fetch_short_interest.SETTLEMENT_DATES`.
-The dashboard still reads embedded `RAW`; live database reads and automatic
-analytics/dashboard publication are not yet implemented.
+`publish_finra_dashboard.py` reads a consistent DB snapshot, refreshes RAW,
+SECTOR_DATA and INSIGHTS_DATA in a deployment copy, remaps prices, and runs the
+validator. The workflow uploads `site/` and deploys via GitHub Pages Actions.
+Set Pages Source to GitHub Actions. The committed HTML remains the UI template;
+use Python patches to edit it and validate afterward. Float ratios for new dates,
+Candidates, borrow, market caps and ticker/basket membership require separate
+source refreshes. The published dashboard displays their freshness limits.
