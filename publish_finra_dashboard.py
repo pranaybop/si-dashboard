@@ -174,6 +174,48 @@ def refresh_raw(template, dates, rows):
     return raw
 
 
+def patch_float_freshness(source, raw):
+    """Expose ratio coverage separately from the FINRA settlement date."""
+    latest = len(raw['dates']) - 1
+    covered = sum(any(i == latest for i, value in t.get('pct', []) if value is not None)
+                  for t in raw['tickers'].values())
+    indices = [i for t in raw['tickers'].values() for i, value in t.get('pct', [])
+               if value is not None]
+    last = raw['dates'][max(indices)] if indices else None
+    fmt = lambda d: f'{d[:4]}-{d[4:6]}-{d[6:]}'
+    note = (f"SI % of Float: calculated ratios through {fmt(last) if last else 'unavailable'}. "
+            f"Latest FINRA settlement {fmt(raw['dates'][-1])}: {covered:,} of "
+            f"{len(raw['tickers']):,} tracked tickers have a ratio. "
+            "Missing ratios are unavailable, not zero. Float is a separate manual CapIQ feed; "
+            "the ratio date is not the date the underlying float was measured.")
+    source = re.sub(r'<!-- FLOAT_COVERAGE_START -->.*?<!-- FLOAT_COVERAGE_END -->', '', source, flags=re.S)
+    markup = ('<!-- FLOAT_COVERAGE_START --><div class="float-coverage" role="status" '
+              'style="padding:10px;margin-bottom:14px;border:1px solid #d69e2e;color:#ecc94b;font-size:.8rem">'
+              + html.escape(note) + '</div><!-- FLOAT_COVERAGE_END -->')
+    for tab in ['trend', 'screener', 'themes', 'rising']:
+        source = re.sub(r'(<div[^>]*id="tab-' + tab + r'"[^>]*>)', lambda m: m[0] + markup, source, count=1)
+    start = source.find("  if(currentView==='pct'&&selectedTickers.length){", source.find('function renderChart'))
+    end_marker = "  document.getElementById('coverageNote').textContent='';\n}"
+    if start < 0:
+        start = source.find('  // FLOAT_TREND_COVERAGE', source.find('function renderChart'))
+        end_marker = "coverage.join('; ');\n}"
+    end = source.find(end_marker, start)
+    if start < 0 or end < 0:
+        raise ValueError('Cannot locate Trend float coverage handler')
+    handler = """  // FLOAT_TREND_COVERAGE
+  const coverage = selectedTickers.map(sym=>{
+    const pairs=(TICKERS[sym]?.[currentView==='pct'?'pct':'si']||[])
+      .filter(([i,v])=>i>=start&&i<=end&&v!==null);
+    const last=pairs.length?Math.max(...pairs.map(p=>p[0])):null;
+    return sym+': '+(last===null?'unavailable in selected range':'through '+DATES_LABELS[last]);
+  });
+  document.getElementById('coverageNote').textContent=
+    (currentView==='pct'?'SI % of Float coverage — ':'Shares Short coverage — ')+coverage.join('; ');
+}"""
+    source = source[:start] + handler + source[end+len(end_marker):]
+    return source
+
+
 def patch_dashboard(source, raw, manifest):
     template, _, _ = block(source, 'RAW')
     sectors = block(source, 'SECTOR_DATA')[0]
@@ -233,7 +275,7 @@ def patch_dashboard(source, raw, manifest):
             'Mover z-scores compare raw SI percent changes with prior changes over three years; theme heat averages constituent 6-month z-scores.')
     banner = '<!-- FINRA_FRESHNESS_START --><div id="finra-freshness" style="padding:12px 24px;color:#a0aec0;background:#16213e;font-size:.8rem">'+html.escape(note)+'</div><!-- FINRA_FRESHNESS_END -->'
     source = source.replace('<div class="tabs">', banner+'\n<div class="tabs">', 1)
-    return source
+    return patch_float_freshness(source, raw)
 
 
 def main():

@@ -40,6 +40,19 @@ class DashboardTests(unittest.TestCase):
         for key in ['rising','covering','rising_2w','covering_2w','rising_6w','covering_6w']:
             self.assertTrue(all(r['t'] != 'B' for r in insight[key]))
 
+    def test_float_freshness_is_idempotent_and_reports_partial_coverage(self):
+        raw = {'dates':['20260115','20260130'], 'tickers':{
+            'A':{'pct':[[0,10],[1,20]]}, 'B':{'pct':[[0,5]]}}}
+        source = ('<div id="tab-trend">'
+                  "function renderChart(){\n"
+                  "  if(currentView==='pct'&&selectedTickers.length){old();}\n"
+                  "  document.getElementById('coverageNote').textContent='';\n}")
+        result = publish.patch_float_freshness(source, raw)
+        self.assertIn('1 of 2 tracked tickers', result)
+        self.assertIn('2026-01-30', result)
+        self.assertNotIn('old()', result)
+        self.assertEqual(publish.patch_float_freshness(result, raw), result)
+
     def test_block_script_escape(self):
         source = 'const RAW={"value":0};'
         changed = publish.replace_block(source,'RAW',{'value':'</script>'})

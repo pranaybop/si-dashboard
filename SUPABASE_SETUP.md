@@ -100,3 +100,28 @@ For a local publication build, supply the private DB URL in the environment:
 all manifest row counts from the same repeatable-read snapshot before building.
 The repository template is not overwritten by scheduled builds. Reload an open
 dashboard to see the most recently published version.
+
+### Float coverage (issue #12)
+
+FINRA provides shares short, not tradable float. Scheduled ingestion and Pages
+publication therefore cannot refresh SI % of Float without a separate float feed.
+The dashboard labels the latest **calculated ratio** date and counts ticker
+coverage at the latest FINRA settlement. That date does not establish the age of
+the underlying CapIQ float observation. Trend also reports coverage per selected
+ticker and retains missing values instead of switching metrics automatically.
+
+Continue refreshing the licensed CapIQ input with `integrate_float_data.py`,
+validate the HTML, and publish the updated template. Publication retains the
+same-date denominators when FINRA corrects its numerator. Do not substitute
+shares outstanding for float or apply today's float to historical settlements.
+
+A potential API alternative is Financial Modeling Prep's
+[shares float API](https://site.financialmodelingprep.com/developer/docs#shares-float),
+which reports floatShares, outstandingShares, an observation date, and a source.
+Its [pricing terms](https://site.financialmodelingprep.com/developer/docs/pricing)
+require a specific agreement for displaying or redistributing data. A free API
+key alone does not establish permission to publish its data on this public site.
+Automating that feed remains pending a suitable display license, credentials,
+and verified historical coverage; no paid requests or provider integration have
+been enabled. Yahoo's unofficial yfinance wrapper also states that Yahoo data
+is for personal use, so it is not an established free public redistribution feed.
