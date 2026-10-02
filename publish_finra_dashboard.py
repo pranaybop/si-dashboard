@@ -183,6 +183,9 @@ def patch_dashboard(source, raw, manifest):
     for name, data in [('RAW',raw), ('SECTOR_DATA',sectors), ('INSIGHTS_DATA',insights), ('PRICES',prices)]:
         source = replace_block(source, name, data)
     source, _ = patch_static_markup(source, raw['dates'])
+    source = re.sub(r'Bi-weekly settlement data (?:·|&middot;) \d{4}(?:–|&ndash;)\d{4} (?:·|&middot;) [\d,]+ tickers',
+                    f'Bi-weekly settlement data · {raw["dates"][0][:4]}–{raw["dates"][-1][:4]} · {len(raw["tickers"]):,} tickers', source)
+
     # Require actual observations at the chosen endpoints; avoid stale carry-forward.
     source = source.replace("for(let i=toIdx;i>=0;i--){if(pv[i]!==undefined){currentSIPct=pv[i];break;}}", "currentSIPct=pv[toIdx]??null;")
     source = source.replace("let fromVal=null;for(let i=fromIdx;i>=0;i--){if(vals[i]!==undefined){fromVal=vals[i];break;}}", "let fromVal=vals[fromIdx]??null;")
@@ -191,7 +194,23 @@ def patch_dashboard(source, raw, manifest):
     source = source.replace("currentView='pct'", "currentView='si'")
     source = source.replace("populatePeriodSelects();\nrenderChips();\nrenderChart();", "populatePeriodSelects();\nsetView('si');\nrenderChips();\nrenderChart();")
     source = source.replace('spanGaps:true', 'spanGaps:false')
-    source = source.replace(' · SI % of Float\";', ' · Shares Short\";')
+    if "// FINRA_PUBLISH_MOVER_VIEW" not in source:
+        # Movers show current FINRA shares by default, with historical float as a toggle.
+        source = source.replace(' · SI % of Float";', ' · "+(minSIType==="shares"?"Shares Short":"SI % of Float");')
+        source = source.replace('    var deltaPct = (curPct!==null && agoPct!==null) ? curPct - agoPct : null;',
+            '    if(minSIType==="shares"){var siMap={}; (t.si||[]).forEach(function(p){siMap[p[0]]=p[1];}); curPct=r.latest; agoPct=siMap[agoIdx]??null;}\n'
+            '    var deltaPct = (curPct!==null && agoPct!==null) ? curPct - agoPct : null;')
+        source = source.replace('r.curPct.toFixed(2)+"%"', '(minSIType==="shares"?fmtSI2(r.curPct):r.curPct.toFixed(2)+"%")')
+        source = source.replace('r.agoPct.toFixed(2)+"%"', '(minSIType==="shares"?fmtSI2(r.agoPct):r.agoPct.toFixed(2)+"%")')
+        source = source.replace('r.deltaPct.toFixed(2)+"pp"', '(minSIType==="shares"?fmtSI2(r.deltaPct):r.deltaPct.toFixed(2)+"pp")')
+        source = source.replace('var lookbackAgoLabel = lookback==="2w"?"2w Ago":"6mo Ago";',
+            'var lookbackAgoLabel = lookback==="2w"?"2w Ago":lookback==="6w"?"6w Ago":"6mo Ago";')
+        source = source.replace('    if(col==="agoPct") th.childNodes[0].textContent = lookbackAgoLabel+" ";',
+            '    if(col==="agoPct") th.childNodes[0].textContent = lookbackAgoLabel+" ";\n'
+            '    if(col==="curPct") th.childNodes[0].textContent = (minSIType==="shares"?"Current SI":"Current SI%")+" ";\n'
+            '    if(col==="deltaPct") th.childNodes[0].textContent = (minSIType==="shares"?"Δ SI shares":"Δ SI%")+" ";')
+        source = source.replace('window.renderRising = function(){',
+                                '// FINRA_PUBLISH_MOVER_VIEW\nwindow.renderRising = function(){', 1)
     # Replace select markup instead of appending repeated initialization scripts.
     for select_id, value in [('metric','si'), ('th-yaxis','raw')]:
         pattern = r'(<select[^>]*id="' + select_id + r'"[^>]*>)(.*?)(</select>)'

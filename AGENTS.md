@@ -58,7 +58,7 @@ for corrections; historical backfill uses `fetch_short_interest.SETTLEMENT_DATES
 `publish_finra_dashboard.py` reads a consistent DB snapshot, refreshes RAW,
 SECTOR_DATA and INSIGHTS_DATA in a deployment copy, remaps prices, and runs the
 validator. The workflow uploads `site/` and deploys via GitHub Pages Actions.
-Set Pages Source to GitHub Actions. The committed HTML remains the UI template;
+Prefer Pages Source GitHub Actions; legacy Pages completion also triggers a refresh. The committed HTML remains the UI template;
 use Python patches to edit it and validate afterward. Float ratios for new dates,
 Candidates, borrow, market caps and ticker/basket membership require separate
 source refreshes. The published dashboard displays their freshness limits.
