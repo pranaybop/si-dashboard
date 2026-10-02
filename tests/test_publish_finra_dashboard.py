@@ -54,10 +54,6 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(publish.indexed([None,100,0,200]),[None,100,0,200])
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class UniverseExpandTests(unittest.TestCase):
     def test_expand_template_from_candidates(self):
         template = {'dates': ['20260115'], 'tickers': {
@@ -73,7 +69,7 @@ class UniverseExpandTests(unittest.TestCase):
         self.assertEqual(template['tickers']['FRVO']['pct'], [])
         self.assertEqual(template['tickers']['FRVO']['name'], 'Fervo Energy Corp')
         self.assertNotIn('<script>', template['tickers']['X']['name'])
-        self.assertIn('<', template['tickers']['X']['name'])
+        self.assertIn('&lt;', template['tickers']['X']['name'])
         # Existing ticker unchanged.
         self.assertEqual(template['tickers']['A']['si'], [[0, 1]])
 
@@ -130,3 +126,7 @@ class UniverseExpandTests(unittest.TestCase):
         self.assertEqual(got['AAA'], 'Alpha Inc')
         empty = publish.select_new_tickers(FakeConn(), known, max_new=0)
         self.assertEqual(empty, {})
+
+
+if __name__ == '__main__':
+    unittest.main()
