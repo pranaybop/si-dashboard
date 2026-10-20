@@ -32,3 +32,9 @@ si_dashboard.html.bak*
 
 # Supabase-generated Pages deployment output
 site/
+
+# Local scheduler secrets and Airflow runtime files
+scheduler/airflow/.env
+scheduler/airflow/logs/
+scheduler/airflow/config/airflow.cfg
+.env

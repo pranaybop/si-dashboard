@@ -66,6 +66,7 @@ class IngestionTests(unittest.TestCase):
         conn = Mock()
         cur = Mock()
         cur.fetchall.return_value = [(date(2026, 9, 15),)]
+        cur.fetchone.return_value = (False,)
         conn.cursor.return_value = nullcontext(cur)
         with patch('sys.argv', ['ingest']), patch.dict('os.environ', {'SUPABASE_DB_URL': 'test'}), \
              patch('psycopg.connect', return_value=conn), \
@@ -81,6 +82,64 @@ class IngestionTests(unittest.TestCase):
              patch.object(ingest, 'candidate_dates', return_value=['20260915']), \
              patch.object(ingest, 'fetch_period', side_effect=ValueError('bad data')):
             self.assertEqual(ingest.main(), 1)
+
+    def test_since_last_fills_holes_without_replaying_earlier_history(self):
+        loaded = {d for d in ingest.SETTLEMENT_DATES if d <= '20260930'}
+        loaded.remove('20260313')
+        dates = ingest.dates_since_last(loaded, today=date(2026, 10, 20))
+        self.assertIn('20260313', dates)
+        self.assertIn('20261015', dates)
+        self.assertNotIn('20261030', dates)
+        self.assertNotIn('20200115', dates)
+        with self.assertRaises(ValueError):
+            ingest.dates_since_last(set(), today=date(2026, 10, 20))
+
+    def test_since_last_flags_are_rejected(self):
+        with patch('sys.argv', ['ingest', '--since-last', '--dry-run']):
+            self.assertEqual(ingest.main(), 2)
+
+    def test_since_last_empty_manifest_exits(self):
+        conn = Mock()
+        cur = Mock()
+        cur.fetchall.return_value = []
+        conn.cursor.return_value = nullcontext(cur)
+        with patch('sys.argv', ['ingest', '--since-last']), \
+             patch.dict('os.environ', {'SUPABASE_DB_URL': 'postgresql://user:secret@db/postgres'}), \
+             patch('psycopg.connect', return_value=conn):
+            err = __import__('io').StringIO()
+            with patch('sys.stderr', err):
+                self.assertEqual(ingest.main(), 2)
+        self.assertIn('--backfill', err.getvalue())
+        self.assertNotIn('secret', err.getvalue())
+        conn.close.assert_called_once()
+
+    def test_job_log_written_only_when_table_exists(self):
+        conn = Mock()
+        cur = Mock()
+        conn.cursor.return_value = nullcontext(cur)
+        conn.transaction.return_value = nullcontext()
+        cur.fetchall.return_value = [(date(2026, 9, 15),)]
+        cur.fetchone.side_effect = [(True,), (7,)]
+        with patch('sys.argv', ['ingest']), patch.dict('os.environ', {'SUPABASE_DB_URL': 'test'}), \
+             patch('psycopg.connect', return_value=conn), \
+             patch.object(ingest, 'candidate_dates', return_value=['20260915']), \
+             patch.object(ingest, 'fetch_period', side_effect=ValueError('bad data')):
+            self.assertEqual(ingest.main(), 1)
+        sql = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertTrue(any(q.startswith('insert into public.finra_ingest_job_log') for q in sql))
+        self.assertTrue(any('status = %s' in q for q in sql))
+        failed = [c for c in cur.execute.call_args_list if 'finished_at' in c.args[0]]
+        self.assertEqual(failed[-1].args[1][0], 'failed')
+
+        cur.execute.reset_mock()
+        cur.fetchone.side_effect = [(False,)]
+        with patch('sys.argv', ['ingest']), patch.dict('os.environ', {'SUPABASE_DB_URL': 'test'}), \
+             patch('psycopg.connect', return_value=conn), \
+             patch.object(ingest, 'candidate_dates', return_value=['20260915']), \
+             patch.object(ingest, 'fetch_period', side_effect=ValueError('bad data')):
+            self.assertEqual(ingest.main(), 1)
+        sql = [c.args[0] for c in cur.execute.call_args_list]
+        self.assertFalse(any(q.startswith('insert into public.finra_ingest_job_log') for q in sql))
 
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@
 Usage:
     python ingest_finra_supabase.py              # probe recent weekdays, load anything new
     python ingest_finra_supabase.py --backfill   # also load every date in SETTLEMENT_DATES
+    python ingest_finra_supabase.py --since-last # fill dates missing since the newest load
     python ingest_finra_supabase.py --dry-run    # fetch + parse, don't touch the database
 
 Env:
@@ -13,13 +14,19 @@ Env:
 Idempotent: each period is loaded in one transaction, upserted on
 (settlement_date, symbol), so reruns and FINRA revisions are safe. Recent periods are refreshed on every run;
 use --refresh with --backfill to reload older revisions.
+--since-last fills settlement dates that are missing after the newest loaded
+file, including known dates that never loaded. It requires a prior backfill.
+
+When public.finra_ingest_job_log exists (migration 0003, applied manually),
+each real load records started/finished/status/rows/settlement date. The table
+is optional; a missing table leaves ingestion unchanged.
 """
 
 import argparse
 import io
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from requests.adapters import HTTPAdapter
@@ -51,13 +58,36 @@ INT_COLS = ["current_short", "previous_short", "avg_daily_volume", "change_prev"
 NUM_COLS = ["days_to_cover", "change_pct"]
 
 
-def candidate_dates(backfill: bool) -> list[str]:
-    today = date.today()
+def candidate_dates(backfill: bool, *, today: date | None = None) -> list[str]:
+    today = today or date.today()
     recent = [today - timedelta(days=n) for n in range(PROBE_DAYS)]
     cands = {d.strftime("%Y%m%d") for d in recent if d.weekday() < 5}
     if backfill:
         cands |= set(SETTLEMENT_DATES)
     return sorted(d for d in cands if d <= today.strftime("%Y%m%d"))
+
+
+def dates_since_last(loaded: set[str], *, today: date | None = None) -> list[str]:
+    """Dates to probe after the newest successful load, plus known dates never loaded.
+
+    An empty ``loaded`` set means history was never backfilled. Callers should
+    use ``--backfill`` in that case rather than walking every weekday since 2020.
+    """
+    if not loaded:
+        raise ValueError("no loaded settlement dates")
+    today = today or date.today()
+    today_s = today.strftime("%Y%m%d")
+    newest = max(loaded)
+    missing_known = [s for s in SETTLEMENT_DATES if s <= today_s and s not in loaded]
+    start = min(missing_known) if missing_known else newest
+    cands = {s for s in SETTLEMENT_DATES if start <= s <= today_s}
+    day = datetime.strptime(newest, "%Y%m%d").date()
+    while day <= today:
+        if day.weekday() < 5:
+            cands.add(day.strftime("%Y%m%d"))
+        day += timedelta(days=1)
+    cands.update(candidate_dates(False, today=today))
+    return sorted(s for s in cands if s <= today_s)
 
 
 def http_session() -> requests.Session:
@@ -148,12 +178,59 @@ def load_period(conn, df: pd.DataFrame) -> int:
     return len(df)
 
 
+def job_log_available(conn) -> bool:
+    """True when the optional attempt log from migration 0003 has been applied."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("select to_regclass(%s) is not null", ("public.finra_ingest_job_log",))
+            return bool(cur.fetchone()[0])
+    except Exception as exc:
+        print(f"  job log unavailable ({type(exc).__name__})", file=sys.stderr)
+        return False
+
+
+def start_job_attempt(conn, enabled: bool, *, started_at: datetime, settlement_date: date):
+    if not enabled or conn is None:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "insert into public.finra_ingest_job_log (started_at, status, settlement_date) "
+                "values (%s, 'running', %s) returning id",
+                (started_at, settlement_date),
+            )
+            return cur.fetchone()[0]
+    except Exception as exc:
+        print(f"  job log start failed ({type(exc).__name__})", file=sys.stderr)
+        return None
+
+
+def finish_job_attempt(conn, attempt_id, *, status: str, row_count: int | None, detail: str | None) -> None:
+    if attempt_id is None or conn is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "update public.finra_ingest_job_log "
+                "set finished_at = now(), status = %s, row_count = %s, detail = %s where id = %s",
+                (status, row_count, detail, attempt_id),
+            )
+    except Exception as exc:
+        print(f"  job log finish failed ({type(exc).__name__})", file=sys.stderr)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--backfill", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--refresh", action="store_true", help="Reload already loaded historical periods")
+    ap.add_argument("--since-last", action="store_true",
+                    help="Fill known dates that never loaded and probe forward from the newest load")
     args = ap.parse_args()
+    if args.since_last and (args.backfill or args.refresh or args.dry_run):
+        print("--since-last reads the last loaded settlement and cannot be combined with "
+              "--backfill, --refresh, or --dry-run", file=sys.stderr)
+        return 2
 
     conn, done = None, set()
     if not args.dry_run:
@@ -168,6 +245,11 @@ def main() -> int:
             with conn.cursor() as cur:
                 cur.execute("select settlement_date from public.finra_ingest_runs")
                 done = {r[0].strftime("%Y%m%d") for r in cur.fetchall()}
+            if args.since_last and not done:
+                print("No settlement date in public.finra_ingest_runs; run --backfill first",
+                      file=sys.stderr)
+                conn.close()
+                return 2
         except Exception as exc:
             print(f"Database initialization failed ({type(exc).__name__}); "
                   "check the connection secret and apply the migrations", file=sys.stderr)
@@ -178,24 +260,41 @@ def main() -> int:
     loaded = 0
     failures = 0
     recent = set(candidate_dates(False))
+    if args.since_last:
+        dates = dates_since_last(done)
+    else:
+        dates = candidate_dates(args.backfill)
+    log_attempts = bool(conn) and job_log_available(conn)
     try:
         with http_session() as session:
-            for d in candidate_dates(args.backfill):
+            for d in dates:
                 if d in done and d not in recent and not args.refresh:
                     continue
+                started = datetime.now(timezone.utc)
+                attempt_id = None
+                attempt_day = datetime.strptime(d, "%Y%m%d").date()
                 try:
                     df = fetch_period(d, session)
                     if df is None:
                         if d in done:
                             raise ValueError("previously loaded file is unavailable")
                         continue
+                    if not args.dry_run:
+                        attempt_id = start_job_attempt(
+                            conn, log_attempts, started_at=started, settlement_date=attempt_day)
                     n = len(df) if args.dry_run else load_period(conn, df)
                     print(f"  {d}: {n:,} rows{' (dry run)' if args.dry_run else ''}")
+                    finish_job_attempt(conn, attempt_id, status="succeeded", row_count=n, detail=None)
                     loaded += 1
                 except Exception as exc:
                     # Do not print connection URLs or credentials in CI logs.
                     detail = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
                     print(f"  {d}: failed ({detail})", file=sys.stderr)
+                    if attempt_id is None and not args.dry_run:
+                        attempt_id = start_job_attempt(
+                            conn, log_attempts, started_at=started, settlement_date=attempt_day)
+                    finish_job_attempt(
+                        conn, attempt_id, status="failed", row_count=None, detail=detail[:500])
                     failures += 1
         print(f"Done. {loaded} period(s) processed; {failures} failed.")
     finally:

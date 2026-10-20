@@ -51,9 +51,16 @@ Single-step runs: each `build_*.py` / `export_candidates.py` has `main()` and ca
 ## Supabase ingestion (deployment pending)
 
 `ingest_finra_supabase.py` loads validated FINRA files into PostgreSQL using
-`SUPABASE_DB_URL`; `.github/workflows/finra_fetch.yml` polls weekdays and supports
-manual backfill/refresh. Apply both `supabase/migrations/` files before ingestion.
-See `SUPABASE_SETUP.md` for secret and deployment setup. Recent periods refresh
+`SUPABASE_DB_URL`. Apply `supabase/migrations/0001_finra_short_interest.sql` and
+`0002_finra_read_permissions.sql` before ingestion. `0003_finra_ingest_job_log.sql`
+is an optional attempt log: do not apply it from a script or CI. The ingest writes
+that table only when it already exists. `.github/workflows/finra_fetch.yml` still
+supports manual backfill/refresh and Pages deploy; its cron is best-effort.
+Weekday runs outside Actions live under `scheduler/` (Docker entrypoint, Airflow
+DAG `finra_short_interest_to_supabase`, systemd timers, Cloud Run notes).
+`check_finra_freshness.py` exits non-zero when the load is late.
+`repository_dispatch` type `finra-publish` rebuilds Pages without a second ingest.
+See `SUPABASE_SETUP.md` and `scheduler/README.md`. Recent periods refresh
 for corrections; historical backfill uses `fetch_short_interest.SETTLEMENT_DATES`.
 `publish_finra_dashboard.py` reads a consistent DB snapshot, refreshes RAW,
 SECTOR_DATA and INSIGHTS_DATA in a deployment copy, remaps prices, and runs the

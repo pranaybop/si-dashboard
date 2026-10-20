@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekday FINRA freshness alarm (07:45 America/Chicago)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 07:45:00
+Timezone=America/Chicago
+Persistent=true
+Unit=finra-freshness.service
+
+[Install]
+WantedBy=timers.target

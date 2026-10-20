@@ -1,0 +1,13 @@
+[Unit]
+Description=FINRA short interest ingest to Supabase
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/finra-ingest.env
+ExecStart=/usr/bin/docker run --rm --env-file /etc/finra-ingest.env finra-ingest:local refresh-cycle
+SyslogIdentifier=finra-ingest
+# A non-zero exit (ingest failure or stale data) is the failure signal.
+# journalctl -u finra-ingest.service shows the STALE/OK line.
