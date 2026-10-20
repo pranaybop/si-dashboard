@@ -1,0 +1,10 @@
+[Unit]
+Description=FINRA Supabase freshness check
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker run --rm --env-file /etc/finra-ingest.env finra-ingest:local check
+SyslogIdentifier=finra-freshness

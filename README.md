@@ -235,9 +235,61 @@ is in the CSV. `add_price_overlay.py --remove` strips the overlay cleanly.
 
 ## Scheduled FINRA ingestion
 
-The optional PostgreSQL collector and GitHub Actions schedule are documented in
-[SUPABASE_SETUP.md](SUPABASE_SETUP.md). Deployment requires applying migrations
-and setting the private `SUPABASE_DB_URL` Actions secret. After ingestion, the workflow builds and validates the embedded dashboard
-from Supabase and publishes it to GitHub Pages. Visitors can view it for free
-without a login. See the setup guide for Pages configuration and data freshness
-limitations.
+The PostgreSQL collector is documented in [SUPABASE_SETUP.md](SUPABASE_SETUP.md).
+Apply `supabase/migrations/0001_finra_short_interest.sql` and
+`0002_finra_read_permissions.sql` before the first load. `0003_finra_ingest_job_log.sql`
+is an optional attempt log; nothing applies it automatically. Keep `SUPABASE_DB_URL`
+in the host's secret store (GitHub Actions secret, `/etc/finra-ingest.env`, or
+Secret Manager). Use the Supabase **session pooler** URI on port 5432 so the job
+can connect over IPv4.
+
+GitHub Actions (`.github/workflows/finra_fetch.yml`) still supports manual
+backfill/refresh and publishes the dashboard to GitHub Pages. Its `schedule`
+(`17 11 * * 1-5` UTC) is best-effort: runs have started several hours late, and
+a slot around 17 Oct 2026 did not fire. That cron is weekdays only; 17 Oct 2026
+was a Saturday, so the reliable fix is a weekday scheduler outside Actions, plus
+a check that fails when the morning load is late. Copy-paste setup for each host
+is in [scheduler/README.md](scheduler/README.md).
+
+### What runs where
+
+| | Weekday cost | Who starts the load | How you see a miss |
+|---|---|---|---|
+| Small VPS, systemd timer | about $5–12/month (1–2 GB droplet or Hetzner CX) | `finra-ingest.timer` at 06:17 America/Chicago, `Persistent=true` | `finra-freshness.timer` at 07:45 exits non-zero; `journalctl -u finra-freshness` |
+| Airflow on a 2–4 GB VPS, or a machine you already have | about $12–24/month, or $0 on hardware you already pay for | DAG `finra_short_interest_to_supabase` | 2 retries, 15 min apart; experimental Deadline Alert 75 min after 06:17; DAG `finra_short_interest_freshness` at 07:45 |
+| Cloud Scheduler + Cloud Run jobs | about $0 (3 Scheduler jobs free per billing account; a few minutes of 1 vCPU weekday jobs sit inside the Cloud Run jobs free tier). Budget under $1 if that free tier is already used. | Scheduler HTTP call at 06:17 America/Chicago | Second job at 07:45; a non-zero exit shows up as a failed Cloud Run execution |
+| GitHub Actions cron | $0 on a public repo | `schedule` in `finra_fetch.yml` | Actions history only. Leave this in place until an external scheduler has succeeded, then delete the `schedule` block |
+
+Optional for any host: set `FINRA_HEALTHCHECK_URL` to a [Healthchecks.io](https://healthchecks.io) check (free tier, cron `17 6 * * 1-5`, timezone America/Chicago, grace about 2 hours). `refresh-cycle` pings it on start, success, and failure. A dead VPS then shows up even when nothing on that VPS can send mail.
+
+06:17 America/Chicago is 07:17 America/New_York year-round. The freshness grace is 75 minutes, so the load is late at 07:32 Chicago (08:32 Eastern). The 07:45 Chicago alarm leaves a few minutes to notice before 09:00 Eastern. Pages build still needs that window, so the external job should dispatch as soon as the freshness check passes.
+
+### Setup, short version
+
+1. Build the image from the repo root: `docker build -t finra-ingest:local .`
+2. Put the session-pooler URI in the environment. The container entrypoint accepts a normal run, `--backfill`, `--refresh`, and `--since-last`.
+   ```sh
+   docker run --rm --env-file /path/finra.env finra-ingest:local
+   docker run --rm --env-file /path/finra.env finra-ingest:local --backfill
+   docker run --rm --env-file /path/finra.env finra-ingest:local --backfill --refresh
+   docker run --rm --env-file /path/finra.env finra-ingest:local --since-last
+   docker run --rm --env-file /path/finra.env finra-ingest:local check
+   docker run --rm --env-file /path/finra.env finra-ingest:local refresh-cycle
+   ```
+   `check` is `python check_finra_freshness.py`. It reads `max(ingested_at)` and `max(settlement_date)` from `public.finra_ingest_runs` and exits 1 with a `STALE:` line when the morning run is late or the newest settlement is older than 36 days. Exit 2 means the secret or the connection is wrong. The script does not print the URI.
+3. Pick one host and follow [scheduler/README.md](scheduler/README.md): systemd units, `scheduler/airflow/docker-compose.yml`, or `scheduler/cloud-run/setup.sh`.
+4. Fill any gap since the newest good load:
+   ```sh
+   python ingest_finra_supabase.py --since-last
+   ```
+   That probes forward from the newest row in `finra_ingest_runs` and any known settlement date in `fetch_short_interest.py` that never loaded. A database with no rows yet still uses `--backfill`. `--backfill --refresh` reloads older revisions.
+
+### Switch-over
+
+1. Run one manual `refresh-cycle` (or `--since-last`, then `check`) and confirm the check prints `OK:`.
+2. Turn on the weekday timer, DAG, or Cloud Scheduler job. Confirm a non-zero freshness check is visible (failed unit, failed task, or failed Cloud Run execution).
+3. To publish Pages from that host, create a fine-grained PAT on the repository that owns Pages with **Contents: Read and write** (classic PAT: `repo` scope). Set `GITHUB_DISPATCH_TOKEN` and `GITHUB_REPOSITORY`. `refresh-cycle` POSTs `repository_dispatch` event `finra-publish` only after ingest and the freshness check succeed. That event runs the existing workflow's build and deploy jobs and skips ingest. `repository_dispatch` runs the workflow on the default branch.
+4. After a weekday load and Pages publish both succeed, delete the `schedule:` block in `.github/workflows/finra_fetch.yml` so Actions does not ingest a second time. Keep `workflow_dispatch`, `workflow_run`, and `repository_dispatch`.
+5. Apply `0003_finra_ingest_job_log.sql` in the SQL editor only if you want per-file `started_at` / `finished_at` / `status` / `row_count` / `settlement_date`. Ingest writes that table when it is present and keeps working when it is absent. The freshness check does not read it.
+
+Visitors still need no database login. The published site is the Pages artifact built by `publish_finra_dashboard.py`.

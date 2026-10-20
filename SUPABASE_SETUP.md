@@ -24,11 +24,16 @@ is the UI template; the freshly published artifact is built in `site/`.
    The existing branch-based Pages configuration also supports this deployment.
    Manually run **FINRA fetch to Supabase**, with `backfill` checked, to load
    history. Check logs for failures and inspect `public.finra_ingest_runs`.
-4. The schedule polls weekdays at **11:17 UTC** (7:17 a.m. EDT / 6:17 a.m. EST). It discovers files by probing
+4. The Actions schedule polls weekdays at **11:17 UTC** (7:17 a.m. EDT / 6:17 a.m. EST). It discovers files by probing
    settlement weekdays, rather than relying on an exact publication time.
    The early run leaves time for ingestion and Pages deployment before 9 a.m.
-   Eastern. GitHub scheduling can be delayed; this is not a guaranteed deadline.
-   FINRA files released after the morning poll appear on the next successful run.
+   Eastern. GitHub scheduling can be delayed or skipped; it is not a guaranteed deadline.
+   A weekday runner outside Actions is the reliable schedule. See
+   [scheduler/README.md](scheduler/README.md) and the comparison in the main README.
+   The container image and `python check_finra_freshness.py` are host-agnostic.
+   After an external ingest is fresh, `refresh-cycle` can POST a `finra-publish`
+   `repository_dispatch` event so this workflow builds and deploys Pages without
+   ingesting again. FINRA files released after the morning poll appear on the next successful run.
    Successful periods and their manifest commit together. Recent 45-day periods
    are always reloaded to capture corrections, including removed symbols.
 5. For corrections older than 45 days, manually dispatch with both `backfill`
@@ -56,6 +61,11 @@ python ingest_finra_supabase.py --dry-run
 # With SUPABASE_DB_URL provided privately in the environment:
 python ingest_finra_supabase.py --backfill
 ```
+
+`supabase/migrations/0003_finra_ingest_job_log.sql` is optional. Apply it by hand
+when you want one row per file attempt (`started_at`, `finished_at`, `status`,
+`row_count`, `settlement_date`). Leave it unapplied until then. The ingest job
+does not run migrations. The freshness check uses `public.finra_ingest_runs`.
 
 The API roles `anon` and `authenticated` receive SELECT only, with matching
 RLS policies; ingestion uses the privileged database connection. Never expose

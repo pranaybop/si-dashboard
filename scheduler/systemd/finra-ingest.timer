@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekday FINRA short interest ingest (06:17 America/Chicago)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 06:17:00
+Timezone=America/Chicago
+Persistent=true
+Unit=finra-ingest.service
+
+[Install]
+WantedBy=timers.target

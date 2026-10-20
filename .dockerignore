@@ -1,0 +1,16 @@
+.git
+.github
+si_dashboard.html
+si_dashboard.html.bak*
+site
+exports
+snapshots
+borrow-data
+analytics/*.parquet
+**/*.csv
+**/__pycache__
+**/*.pyc
+scheduler/airflow/logs
+scheduler/airflow/config
+**/.env
+validate-dashboard-skill
