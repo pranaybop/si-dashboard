@@ -69,3 +69,10 @@ Prefer Pages Source GitHub Actions; legacy Pages completion also triggers a refr
 use Python patches to edit it and validate afterward. Float ratios for new dates,
 Candidates, borrow, market caps and ticker/basket membership require separate
 source refreshes. The published dashboard displays their freshness limits.
+
+## Cursor Cloud specific instructions
+
+- Python 3.12. Idempotent install: `python3 -m pip install --user -r requirements-finra.txt 'pyarrow>=15,<22' 'openpyxl>=3.1,<4' 'PyYAML>=6,<7'`. `requirements-finra.txt` is the ingest set (requests, pandas, psycopg). Analytics scripts also import pyarrow and openpyxl; scheduler tests import PyYAML (often already provided by `python3-yaml`).
+- The product UI is the committed static file `si_dashboard.html` (about 39 MB). On boot it is served at `http://127.0.0.1:8765/si_dashboard.html`. Chart.js is loaded from `cdn.jsdelivr.net` and must be reachable for charts to draw. A missing favicon 404 is harmless.
+- Checks that do not need `SUPABASE_DB_URL`: `python3 -m unittest discover -s tests` and `python3 validate_dashboard.py`. Live ingest (`ingest_finra_supabase.py`) and `publish_finra_dashboard.py` need that URL and are outside local UI verification.
+- Hello-world UI check: open the Trend Chart, add a ticker from search (for example AAPL), switch Shares Short / SI % of Float, open Themes, run the Screener, and click a result row (it returns to the trend chart).
